@@ -1,8 +1,8 @@
 // Service worker : l'app fonctionne hors-ligne (sauf les leçons IA qui nécessitent Internet)
-const CACHE = 'fluentquest-v1';
+const CACHE = 'fluentquest-v2';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
-  'js/app.js', 'js/ai.js', 'js/speech.js', 'js/store.js', 'js/curriculum.js',
+  'js/app.js', 'js/ai.js', 'js/speech.js', 'js/store.js', 'js/curriculum.js', 'js/sfx.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
