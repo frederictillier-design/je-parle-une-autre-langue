@@ -35,6 +35,14 @@ function modal(html, { onClose, cls = '' } = {}) {
   m.addEventListener('click', (e) => { if (e.target === m || e.target.closest('[data-close]')) close(); });
   return { el: m, close };
 }
+// Confirmation dans la page (confirm() est bloqué quand l'app tourne dans Claude)
+function ask(msg, okLabel = 'Oui') {
+  return new Promise((res) => {
+    const m = modal(`<p>${msg}</p><div class="row"><button class="btn" data-close id="askNo">Annuler</button><button class="btn primary" id="askYes">${okLabel}</button></div>`, { onClose: () => res(false) });
+    $('#askYes', m.el).onclick = () => { m.el.remove(); res(true); };
+  });
+}
+const EMBEDDED = window.self !== window.top;
 function confetti(n = 80) {
   const box = document.createElement('div'); box.className = 'confetti';
   const colors = ['#ff6b6b', '#ffd93d', '#6bcB77', '#4d96ff', '#c77dff'];
@@ -333,8 +341,8 @@ views.lesson = () => {
       <button id="send" class="send" aria-label="Envoyer">➤</button>
     </footer>
   </div>`;
-  $('#quit').onclick = () => {
-    if (lesson.done || lesson.turns === 0 || confirm('Quitter la leçon ? Elle ne sera pas validée (les XP gagnés sont conservés).')) { lesson = null; go('home'); }
+  $('#quit').onclick = async () => {
+    if (lesson.done || lesson.turns === 0 || await ask('Quitter la leçon ? Elle ne sera pas validée (les XP gagnés sont conservés).', 'Quitter')) { lesson = null; go('home'); }
   };
   $('#endBtn').onclick = () => {
     if (lesson.busy || lesson.done) return;
@@ -611,6 +619,7 @@ function finishLesson(r) {
 
 // ---------- Micro ----------
 function micMode() {
+  if (EMBEDDED) return 'kbd'; // le micro n'est pas accessible dans une page Claude
   const s = state.settings.micMode;
   if (s === 'browser') return SP.srSupported() ? 'sr' : 'kbd';
   if (s === 'gemini') return SP.recSupported() && state.settings.geminiKey ? 'rec' : 'kbd';
@@ -636,7 +645,7 @@ async function toggleMic() {
   const p = ST.profile(); const lang = lesson.lang;
   if (mode === 'kbd') {
     $('#txt').focus();
-    return toast(isIOS ? 'Utilise la dictée 🎤 du clavier iPhone (choisis la langue avec 🌐)' : 'Micro indisponible : écris ta réponse');
+    return toast(EMBEDDED ? 'Dans Claude, le micro direct n’est pas disponible : touche le champ et utilise la dictée 🎤 du clavier (langue choisie avec 🌐)' : isIOS ? 'Utilise la dictée 🎤 du clavier iPhone (choisis la langue avec 🌐)' : 'Micro indisponible : écris ta réponse', 4500);
   }
   if (mode === 'sr') {
     btn.classList.add('on'); $('#txt').placeholder = '🎙️ Je t’écoute… (touche pour finir)';
@@ -738,7 +747,10 @@ views.pronounce = () => {
         if (st >= 2) { const g = gainXP(p, st * 2); floatText(`+${g} XP`); sfx.good(); ST.bump(p, 'repeatOk'); p.stats.repeats++; save(); } else sfx.bad();
         draw(`<div class="pres"><div class="stars">${'★'.repeat(st)}<span class="off">${'☆'.repeat(3 - st)}</span></div><p>Compris : « ${esc(said || '…')} »</p><b>${Math.round(sim * 100)} %</b></div>`);
       };
-      if (SP.srSupported() && !srBroken && state.settings.micMode !== 'gemini') {
+      if (EMBEDDED) {
+        const said = await new Promise((res) => { const m = modal(`<p>Dicte la phrase avec le clavier 🎤 :</p><input id="dict" lang="${bcp(p, lang)}" autocapitalize="off"><button class="btn primary" id="dOk">Valider</button>`, { onClose: () => res('') }); $('#dict', m.el).focus(); $('#dOk', m.el).onclick = () => { const v = $('#dict', m.el).value; m.el.remove(); res(v); }; });
+        if (said) evaluate(said);
+      } else if (SP.srSupported() && !srBroken && state.settings.micMode !== 'gemini') {
         btn.classList.add('on'); let got = '';
         const stop = SP.listen(bcp(p, lang), { onInterim: (t) => (got = t), onError: (e) => { if (e === 'not-allowed' || e === 'service-not-allowed') srBroken = true; }, onEnd: () => { btn.classList.remove('on'); evaluate(got); } });
         btn.onclick = () => stop();
@@ -808,7 +820,9 @@ views.family = () => {
   bindGo();
   $$('[data-switch]').forEach((b) => (b.onclick = () => { state.activeId = b.dataset.switch; const p = ST.profile(); state.activeLang = Object.keys(p.langs)[0]; save(); go('home'); }));
   $('#addP').onclick = () => go('onboarding');
-  const dl = (txt, name) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'application/json' })); a.download = name; a.click(); };
+  const dl = (txt, name) => {
+    if (EMBEDDED) { navigator.clipboard.writeText(txt).then(() => toast('📋 Sauvegarde copiée : colle-la dans une note ou un message')).catch(() => toast('Copie impossible ici')); return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'application/json' })); a.download = name; a.click(); };
   $('#expOne').onclick = () => dl(ST.exportData(false), `fluentquest-${ST.profile().name}-${ST.today()}.json`);
   $('#expAll').onclick = () => dl(ST.exportData(true), `fluentquest-sauvegarde-${ST.today()}.json`);
   $('#imp').onchange = async (e) => {
@@ -922,9 +936,9 @@ function bindProfileSettings(p) {
     const c = b.dataset.addlang; p.langs[c] = ST.newLangState('A0', C.LANGS[c].accents[0]); ST.seedDeck(p, c);
     p.pendingTests = [...(p.pendingTests || []), c]; save(); go('settings');
   }));
-  $('#resetP').onclick = () => { if (confirm(`Effacer toute la progression de ${p.name} ?`)) { for (const L of Object.values(p.langs)) { L.progress = {}; L.startDate = ST.today(); } p.xp = 0; p.xpByDay = {}; p.badges = {}; p.coins = 0; p.streak = { count: 0, last: null, freezes: 0, best: 0 }; save(); toast('Progression remise à zéro'); } };
-  $('#delP').onclick = () => {
-    if (!confirm(`Supprimer définitivement le profil ${p.name} ?`)) return;
+  $('#resetP').onclick = async () => { if (await ask(`Effacer toute la progression de ${esc(p.name)} ?`, 'Effacer')) { for (const L of Object.values(p.langs)) { L.progress = {}; L.startDate = ST.today(); } p.xp = 0; p.xpByDay = {}; p.badges = {}; p.coins = 0; p.streak = { count: 0, last: null, freezes: 0, best: 0 }; save(); toast('Progression remise à zéro'); } };
+  $('#delP').onclick = async () => {
+    if (!(await ask(`Supprimer définitivement le profil ${esc(p.name)} ?`, 'Supprimer'))) return;
     state.profiles = state.profiles.filter((x) => x.id !== p.id); state.activeId = state.profiles[0]?.id || null; save(); boot();
   };
 }
