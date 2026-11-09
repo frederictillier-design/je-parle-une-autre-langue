@@ -1,7 +1,11 @@
-// Connexion aux API Gemini ou Claude, directement depuis le navigateur (clé stockée sur l'appareil uniquement).
+// Connexion à l'IA, directement depuis le navigateur :
+//  - Gemini (clé AI Studio — gratuite sans compte de facturation) avec choix automatique du modèle gratuit
+//  - Claude via l'API (clé payante)
+//  - Claude via l'abonnement claude.ai, quand l'app tourne comme page (artifact) dans Claude
 import { LANGS, SESSIONS, weekPlan, isBeginner } from './curriculum.js';
 
-export const DEFAULT_MODELS = { gemini: 'gemini-3.5-flash', claude: 'claude-haiku-5-5' };
+export const DEFAULT_MODELS = { gemini: 'auto', claude: 'claude-haiku-5-5' };
+const MAX_HISTORY = 18; // messages gardés (en plus du premier) pour limiter la taille des requêtes
 
 function parseJSON(text) {
   if (!text) throw new Error('Réponse vide de l’IA');
@@ -11,54 +15,133 @@ function parseJSON(text) {
   try { return JSON.parse(t); } catch { return { reply: text.trim() }; }
 }
 
-async function httpError(res) {
-  let msg = `${res.status}`;
-  try { const j = await res.json(); msg += ' — ' + (j.error?.message || JSON.stringify(j)); } catch {}
-  if (res.status === 401 || res.status === 403) msg += ' (clé API invalide ?)';
-  if (res.status === 404) msg += ' (nom de modèle introuvable ? Vérifie les réglages)';
-  if (res.status === 429) msg += ' (quota ou limite de débit atteint)';
-  return new Error(msg);
+const trim = (messages) => (messages.length > MAX_HISTORY + 1 ? [messages[0], ...messages.slice(-MAX_HISTORY)] : messages);
+const todayKey = () => new Date().toISOString().slice(0, 10);
+
+// ---------- Compteur d'usage (affiché dans les réglages) ----------
+function lsGet(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+export function usageToday() { const u = lsGet('fq.usage', {}); return u.date === todayKey() ? u : { date: todayKey(), n: 0, models: {} }; }
+function countUsage(model) { const u = usageToday(); u.n++; u.models[model] = (u.models[model] || 0) + 1; lsSet('fq.usage', u); }
+
+// ---------- Mode « abonnement Claude » (page dans claude.ai) ----------
+export const inClaude = () => typeof window !== 'undefined' && typeof window.claude?.use === 'function';
+let samplePromise = null;
+const getSample = () => (samplePromise ??= inClaude() ? window.claude.use('sample') : Promise.resolve(null));
+
+async function callClaudeApp(system, messages) {
+  const sample = await getSample();
+  if (!sample) throw new Error('L’IA de Claude n’est pas disponible ici (ouvre l’app depuis Claude, ou choisis Gemini dans les réglages)');
+  const msgs = trim(messages).map((m) => ({ role: m.role, content: m.content }));
+  msgs[0] = { ...msgs[0], content: `${system}\n\n---\n\n${msgs[0].content}` };
+  try {
+    const r = await sample(msgs, { modelTier: 'quick', cache: false });
+    return r.text;
+  } catch (e) {
+    if (e?.code === 'rate_limited') throw new Error('Limite d’usage de ton abonnement Claude atteinte pour le moment — réessaie un peu plus tard.');
+    if (e?.code === 'not_granted') throw new Error('Autorise l’accès à Claude pour cette page (demande affichée au premier appel).');
+    throw new Error(e?.message || 'Erreur Claude');
+  }
 }
 
-async function callGemini({ key, model, system, messages, json = true, extraParts }) {
-  const contents = messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+// ---------- Gemini : modèles gratuits automatiques ----------
+let geminiList = null;
+function rankGemini(names) {
+  const ver = (n) => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  const score = (n) => (n.includes('flash-lite') ? 2 : 1) * 100 + ver(n) - (/preview|exp/.test(n) ? 40 : 0) - (/-\d{3}$|latest/.test(n) ? 1 : 0);
+  return names.filter((n) => /flash/.test(n) && !/(thinking|image|tts|live|audio|embedding|robotics|computer)/.test(n)).sort((a, b) => score(b) - score(a));
+}
+async function geminiCandidates(settings) {
+  const m = (settings.geminiModel || 'auto').trim();
+  if (m && m !== 'auto') return [m];
+  if (!geminiList) {
+    try { geminiList = rankGemini(await listModels({ ...settings, provider: 'gemini' })); } catch (e) { if (/401|403/.test(e.message)) throw e; geminiList = []; }
+    if (!geminiList.length) geminiList = ['gemini-3.5-flash-lite', 'gemini-3.5-flash'];
+  }
+  return geminiList;
+}
+const exhausted = () => { const x = lsGet('fq.exhausted', {}); return x.date === todayKey() ? x : { date: todayKey(), models: [] }; };
+const markExhausted = (model) => { const x = exhausted(); if (!x.models.includes(model)) x.models.push(model); lsSet('fq.exhausted', x); };
+
+export class QuotaError extends Error {}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function geminiRequest(key, model, body) {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body),
+  });
+  let data = null; try { data = await res.json(); } catch {}
+  return { status: res.status, ok: res.ok, data };
+}
+
+async function callGemini(settings, { system, messages, json = true, extraParts }) {
+  const contents = trim(messages).map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
   if (extraParts) contents.push({ role: 'user', parts: extraParts });
   const body = { contents, generationConfig: { temperature: 1.0, maxOutputTokens: 4096 } };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
   if (json) body.generationConfig.responseMimeType = 'application/json';
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-    method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body),
-  });
-  if (!res.ok) throw await httpError(res);
-  const data = await res.json();
-  const parts = data.candidates?.[0]?.content?.parts || [];
-  return parts.filter((p) => !p.thought).map((p) => p.text || '').join('');
+
+  const all = await geminiCandidates(settings);
+  const manual = all.length === 1 && settings.geminiModel && settings.geminiModel !== 'auto';
+  const tryList = manual ? all : all.filter((m) => !exhausted().models.includes(m));
+  let lastErr = '';
+  for (const model of tryList) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const r = await geminiRequest(settings.geminiKey, model, body);
+      if (r.ok) {
+        countUsage(model);
+        const parts = r.data?.candidates?.[0]?.content?.parts || [];
+        return parts.filter((p) => !p.thought).map((p) => p.text || '').join('');
+      }
+      const msg = r.data?.error?.message || `Erreur ${r.status}`;
+      const raw = JSON.stringify(r.data || {});
+      if (r.status === 401 || r.status === 403 || (r.status === 400 && /API key/i.test(msg))) throw new Error('Clé Gemini refusée : vérifie-la dans les réglages.');
+      if (r.status === 429) {
+        if (/PerDay|per day|daily/i.test(raw)) { markExhausted(model); lastErr = 'quota'; break; } // quota du jour → modèle suivant
+        const delay = Number((raw.match(/"retryDelay":"(\d+)/) || [])[1] || 0);
+        if (attempt === 0 && delay > 0 && delay <= 30) { await sleep(delay * 1000 + 300); continue; } // limite par minute
+        lastErr = 'rate'; break;
+      }
+      if (r.status === 404 || (r.status === 400 && /model/i.test(msg))) { lastErr = msg; break; } // modèle indisponible → suivant
+      if (r.status >= 500 && attempt === 0) { await sleep(1500); continue; }
+      throw new Error(`Gemini : ${msg}`);
+    }
+  }
+  if (lastErr === 'quota' || (!tryList.length && !manual))
+    throw new QuotaError('Quota gratuit Gemini du jour épuisé. Il se recharge chaque jour vers 9 h (heure de Paris). En attendant, la révision des cartes 🃏 et la prononciation 🎙️ marchent sans IA.');
+  if (lastErr === 'rate') throw new QuotaError('Trop de demandes en une minute pour l’offre gratuite : patiente 1 minute puis touche « Réessayer ».');
+  throw new Error(`Gemini : ${lastErr || 'aucun modèle disponible'}`);
 }
 
-async function callClaude({ key, model, system, messages }) {
+async function callClaudeAPI(settings, system, messages) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
-      'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01',
+      'content-type': 'application/json', 'x-api-key': settings.claudeKey, 'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model, max_tokens: 1500, system, messages }),
+    body: JSON.stringify({ model: settings.claudeModel || DEFAULT_MODELS.claude, max_tokens: 1500, system, messages: trim(messages) }),
   });
-  if (!res.ok) throw await httpError(res);
+  if (!res.ok) {
+    let msg = `${res.status}`; try { msg += ' — ' + (await res.json()).error?.message; } catch {}
+    throw new Error(`Claude API : ${msg}`);
+  }
   const data = await res.json();
+  countUsage(settings.claudeModel);
   return (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
 }
 
 export function aiReady(settings) {
   const p = settings.provider;
+  if (p === 'claudeapp') return inClaude();
   return !!(p === 'gemini' ? settings.geminiKey : settings.claudeKey);
 }
 
 export async function chat(settings, system, messages) {
   const p = settings.provider;
-  const text = p === 'gemini'
-    ? await callGemini({ key: settings.geminiKey, model: settings.geminiModel || DEFAULT_MODELS.gemini, system, messages })
-    : await callClaude({ key: settings.claudeKey, model: settings.claudeModel || DEFAULT_MODELS.claude, system, messages });
+  const text = p === 'claudeapp' ? await callClaudeApp(system, messages)
+    : p === 'gemini' ? await callGemini(settings, { system, messages })
+    : await callClaudeAPI(settings, system, messages);
   return parseJSON(text);
 }
 
@@ -67,29 +150,33 @@ export async function testConnection(settings) {
   return r.reply || JSON.stringify(r);
 }
 
+export function resetModelCache() { geminiList = null; }
+export const resolvedGeminiModels = () => geminiList;
+
 export async function listModels(settings) {
   if (settings.provider === 'gemini') {
     const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': settings.geminiKey } });
-    if (!res.ok) throw await httpError(res);
+    if (!res.ok) throw new Error(`Gemini ${res.status} (clé valide ?)`);
     const j = await res.json();
     return (j.models || [])
       .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
       .map((m) => m.name.replace('models/', ''))
       .filter((n) => n.startsWith('gemini') && !/(tts|image|live|embedding|audio|transcribe|translate)/.test(n));
   }
+  if (settings.provider === 'claudeapp') return ['quick (rapide)', 'default', 'complex'];
   const res = await fetch('https://api.anthropic.com/v1/models?limit=100', {
     headers: { 'x-api-key': settings.claudeKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
   });
-  if (!res.ok) throw await httpError(res);
+  if (!res.ok) throw new Error(`Claude ${res.status} (clé valide ?)`);
   const j = await res.json();
   return (j.data || []).map((m) => m.id);
 }
 
 // Transcription audio (repli quand la reconnaissance vocale du navigateur n'est pas dispo, ex. iPhone en mode app)
 export async function transcribe(settings, wavBase64, lang) {
-  if (!settings.geminiKey) throw new Error('Transcription audio : nécessite une clé Gemini');
-  const text = await callGemini({
-    key: settings.geminiKey, model: settings.geminiModel || DEFAULT_MODELS.gemini, json: false, messages: [],
+  if (!settings.geminiKey) throw new Error('Transcription audio : nécessite une clé Gemini (gratuite). Sinon, utilise la dictée du clavier.');
+  const text = await callGemini(settings, {
+    json: false, messages: [],
     extraParts: [
       { inlineData: { mimeType: 'audio/wav', data: wavBase64 } },
       { text: `Transcribe exactly what the speaker says. The speaker is a French learner speaking ${LANGS[lang].native} (may mix in some French). Keep their mistakes, do not correct anything. Output only the transcription text.` },

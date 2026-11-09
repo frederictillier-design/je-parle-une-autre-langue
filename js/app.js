@@ -80,7 +80,11 @@ function go(view, params = {}) {
 
 function boot() {
   setSound(state.settings.sound);
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  const embedded = window.self !== window.top; // page affichée dans Claude
+  if ('serviceWorker' in navigator && !embedded) navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Dans Claude : utiliser l'abonnement Claude par défaut (si aucune clé n'est configurée)
+  const pickClaude = () => { if (AI.inClaude() && !AI.aiReady(state.settings)) { state.settings.provider = 'claudeapp'; save(); } };
+  pickClaude(); setTimeout(pickClaude, 1500);
   const p = ST.profile();
   if (!p) return go('onboarding');
   if (!p.langs[state.activeLang]) state.activeLang = Object.keys(p.langs)[0];
@@ -819,13 +823,16 @@ views.settings = ({ welcome } = {}) => {
   app.innerHTML = `<div class="page narrow">
     ${welcome ? '' : '<button class="back" data-go="home">← Accueil</button>'}
     <h2>⚙️ Réglages</h2>
-    ${welcome ? `<div class="card notice">Dernière étape : connecte une IA (Gemini <b>ou</b> Claude). La clé reste <b>uniquement sur cet appareil</b>.<br><small>Gemini : clé gratuite sur <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> · Claude : <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a></small></div>` : ''}
+    ${welcome ? `<div class="card notice">Dernière étape : connecte une IA. ${AI.inClaude() ? 'Ici, dans Claude, tu peux simplement choisir <b>« Mon abonnement Claude »</b> : rien à configurer.' : 'Le plus simple et <b>gratuit</b> : une clé Gemini (voir l’encadré ci-dessous).'} La clé reste <b>uniquement sur cet appareil</b>.</div>` : ''}
     <form class="card form" id="sf">
       <div class="field"><span>Moteur d’IA</span><div class="seg">
         <label><input type="radio" name="provider" value="gemini" ${s.provider === 'gemini' ? 'checked' : ''}><span>✦ Gemini</span></label>
-        <label><input type="radio" name="provider" value="claude" ${s.provider === 'claude' ? 'checked' : ''}><span>✳︎ Claude</span></label></div></div>
+        <label><input type="radio" name="provider" value="claude" ${s.provider === 'claude' ? 'checked' : ''}><span>✳︎ Claude API</span></label>
+        ${AI.inClaude() ? `<label><input type="radio" name="provider" value="claudeapp" ${s.provider === 'claudeapp' ? 'checked' : ''}><span>✳︎ Mon abonnement Claude</span></label>` : ''}</div></div>
+      ${AI.inClaude() ? '<p class="muted small">✳︎ <b>Mon abonnement Claude</b> : aucune clé, aucun coût — les leçons utilisent ton abonnement claude.ai (dans ses limites d’usage).</p>' : ''}
+      <div class="free-box">💸 <b>Gratuit avec Gemini</b> : crée ta clé sur <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> avec un compte Gmail personnel et <b>n’active pas la facturation</b> → rien ne peut être facturé. Laisse le modèle sur <code>auto</code> : l’app choisit le modèle gratuit le plus généreux et change de modèle si un quota est atteint.<br><small>Requêtes IA aujourd’hui sur cet appareil : <b>${AI.usageToday().n}</b>${Object.keys(AI.usageToday().models).length ? ' (' + Object.entries(AI.usageToday().models).map(([m, n]) => `${esc(m)} : ${n}`).join(', ') + ')' : ''}</small></div>
       <label>Clé API Gemini<input type="password" name="geminiKey" value="${esc(s.geminiKey)}" placeholder="AIza…" autocomplete="off"></label>
-      <label>Modèle Gemini<input name="geminiModel" value="${esc(s.geminiModel)}" list="gm"><datalist id="gm"></datalist></label>
+      <label>Modèle Gemini <small>(<code>auto</code> recommandé)</small><input name="geminiModel" value="${esc(s.geminiModel)}" list="gm" placeholder="auto"><datalist id="gm"><option value="auto"></datalist></label>
       <label>Clé API Claude<input type="password" name="claudeKey" value="${esc(s.claudeKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
       <label>Modèle Claude<input name="claudeModel" value="${esc(s.claudeModel)}" list="cm"><datalist id="cm"></datalist></label>
       <div class="row"><button type="button" class="btn" id="test">🔌 Tester</button><button type="button" class="btn" id="models">📃 Lister les modèles</button></div>
@@ -840,26 +847,26 @@ views.settings = ({ welcome } = {}) => {
       <button class="btn primary big">Enregistrer</button>
     </form>
     ${p ? profileSettings(p) : ''}
-    <p class="muted small center">FluentQuest v2 · données stockées localement sur cet appareil</p></div>`;
+    <p class="muted small center">FluentQuest v3 · données stockées localement sur cet appareil</p></div>`;
   bindGo();
   const form = $('#sf');
   const collect = () => {
     const f = new FormData(form);
-    Object.assign(s, { provider: f.get('provider'), geminiKey: f.get('geminiKey').trim(), claudeKey: f.get('claudeKey').trim(), geminiModel: f.get('geminiModel').trim(), claudeModel: f.get('claudeModel').trim(), micMode: f.get('micMode'), handsFree: !!f.get('handsFree'), sound: !!f.get('sound') });
+    Object.assign(s, { provider: f.get('provider'), geminiKey: f.get('geminiKey').trim(), claudeKey: f.get('claudeKey').trim(), geminiModel: f.get('geminiModel').trim() || 'auto', claudeModel: f.get('claudeModel').trim(), micMode: f.get('micMode'), handsFree: !!f.get('handsFree'), sound: !!f.get('sound') });
     setSound(s.sound); save();
   };
   form.onsubmit = (e) => { e.preventDefault(); collect(); toast('Réglages enregistrés ✓'); if (welcome) go('home'); };
   $('#test').onclick = async (e) => {
-    collect(); if (!AI.aiReady(s)) return toast('Renseigne la clé du moteur choisi');
+    collect(); AI.resetModelCache(); if (!AI.aiReady(s)) return toast('Renseigne la clé du moteur choisi');
     e.target.textContent = '⏳…';
-    try { const r = await AI.testConnection(s); toast(`✅ Connecté : « ${esc(r)} »`, 4000); } catch (err) { toast('❌ ' + esc(err.message), 6000); }
+    try { const r = await AI.testConnection(s); const m = s.provider === 'gemini' && AI.resolvedGeminiModels() ? ` · modèle : ${esc(AI.resolvedGeminiModels()[0])}` : ''; toast(`✅ Connecté : « ${esc(r)} »${m}`, 4500); } catch (err) { toast('❌ ' + esc(err.message), 6000); }
     e.target.textContent = '🔌 Tester';
   };
   $('#models').onclick = async () => {
     collect(); if (!AI.aiReady(s)) return toast('Renseigne la clé du moteur choisi');
     try {
       const list = await AI.listModels(s);
-      $(s.provider === 'gemini' ? '#gm' : '#cm').innerHTML = list.map((m) => `<option value="${esc(m)}">`).join('');
+      $(s.provider === 'gemini' ? '#gm' : '#cm').innerHTML = (s.provider === 'gemini' ? '<option value="auto">' : '') + list.map((m) => `<option value="${esc(m)}">`).join('');
       toast(`${list.length} modèles disponibles — touche le champ « Modèle » pour choisir`, 4000);
     } catch (err) { toast('❌ ' + esc(err.message), 6000); }
   };

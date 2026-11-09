@@ -19,8 +19,10 @@ export const state = (() => {
   try { return Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return defaults(); }
 })();
 state.settings = Object.assign(defaults().settings, state.settings);
+// V3 : l'ancien modèle par défaut devient « auto » (modèle gratuit choisi automatiquement)
+if (!state.settings.geminiModel || state.settings.geminiModel === 'gemini-3.5-flash') state.settings.geminiModel = 'auto';
 
-export const save = () => localStorage.setItem(KEY, JSON.stringify(state));
+export const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
 export const profile = () => state.profiles.find((p) => p.id === state.activeId) || null;
 
 export const today = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

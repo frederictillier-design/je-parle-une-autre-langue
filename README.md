@@ -24,7 +24,7 @@ Application web autonome (PWA) : conversations orales avec un coach IA (Gemini *
 3. Dépôt → **Settings → Pages** → *Source* : `Deploy from a branch`, branche `main`, dossier `/ (root)` → **Save**.
 4. Après ~1 minute, l’app est en ligne sur `https://<ton-compte>.github.io/fluentquest/`.
 
-Pour publier une mise à jour : remplace les fichiers, puis incrémente `CACHE = 'fluentquest-v2'` dans `sw.js` (v3, v4…).
+Pour publier une mise à jour : remplace les fichiers, puis incrémente `CACHE = 'fluentquest-v3'` dans `sw.js` (v3, v4…).
 
 ### Mettre à jour l’app sur le téléphone
 Les données (progression, XP, clé API) sont conservées : elles restent dans le stockage de l’app, pas dans les fichiers.
@@ -37,14 +37,27 @@ Les données (progression, XP, clé API) sont conservées : elles restent dans l
 - **iPhone** : ouvrir l’URL dans **Safari** → Partager ⬆︎ → **Sur l’écran d’accueil**.
 - **PC (Chrome/Edge)** : icône *Installer* dans la barre d’adresse.
 
-## Clé d’IA
-Au premier lancement : **Réglages** → choisir Gemini ou Claude → coller la clé → **Tester**.
-- **Gemini** : clé sur https://aistudio.google.com/apikey (offre gratuite avec quotas). Modèle par défaut `gemini-3.5-flash` ; le bouton *Lister les modèles* affiche ceux disponibles sur ton compte.
-- **Claude** : clé sur https://console.anthropic.com (payant à l’usage). Modèle par défaut `claude-haiku-5-5` (rapide et économique) ; `claude-sonnet-5-5` pour un coach plus fin.
+## IA : comment l’utiliser gratuitement
+Choix dans **Réglages** :
 
-⚠️ La clé est stockée **dans le navigateur de l’appareil** (localStorage), jamais dans le dépôt. Ne la mets pas dans le code. Fixe une limite de dépenses dans la console du fournisseur. Ne la saisis que sur les appareils de la famille.
+| Option | Coût | Où ça marche |
+|---|---|---|
+| **Gemini (clé AI Studio)** — recommandé | **Gratuit** si la clé n’est liée à aucun compte de facturation | Partout (GitHub Pages, iPhone, PC) |
+| **Mon abonnement Claude** | Inclus dans l’abonnement claude.ai (dans ses limites d’usage) | Uniquement quand l’app est ouverte **dans Claude** (version « artifact ») |
+| Claude API | Payant à l’usage | Partout |
 
-Ordre de grandeur : une leçon ≈ 10 allers-retours ≈ 30–60 k tokens cumulés → quelques centimes avec un modèle « flash/haiku ».
+**Gemini gratuit, pas à pas**
+1. Avec un compte **Gmail personnel**, va sur https://aistudio.google.com/apikey → *Create API key*. Les comptes Google Workspace sont souvent bloqués par l’administrateur, et l’abonnement Workspace n’inclut pas l’API.
+2. **N’active pas la facturation** (pas de carte bancaire) : le projet reste dans l’offre gratuite et rien ne peut être facturé.
+3. Colle la clé dans Réglages → Gemini, laisse le modèle sur **`auto`** → **Tester**.
+
+Le mode `auto` choisit le modèle gratuit le plus généreux (« Flash-Lite » d’abord). Si le quota gratuit du jour d’un modèle est épuisé, l’app passe automatiquement au suivant. Quand tout est épuisé, un message l’indique : les quotas se rechargent chaque jour vers 9 h (heure de Paris). La révision des cartes et la prononciation fonctionnent sans IA. Une leçon fait environ 12 à 15 requêtes : prévois **une clé par personne** (chacun son compte Gmail) pour ne pas partager le quota.
+
+À savoir : sur l’offre gratuite, Google peut utiliser les échanges pour améliorer ses produits. Ne mets pas d’informations personnelles dans le champ « À propos ».
+
+**Mode abonnement Claude** : la même application est publiée comme page dans Claude. Ouverte depuis Claude par une personne connectée, elle utilise son abonnement, sans clé ni coût supplémentaire. Limites : il faut être connecté à claude.ai, les comptes Claude sont réservés aux plus de 18 ans, et le micro dépend de ce que l’app Claude autorise. Sinon, utilise la dictée du clavier.
+
+La clé API, quand il y en a une, est stockée **dans le navigateur de l’appareil** (localStorage), jamais dans le dépôt.
 
 ## Micro & voix — à savoir
 - **PC (Chrome/Edge)** : reconnaissance vocale native, excellente.
