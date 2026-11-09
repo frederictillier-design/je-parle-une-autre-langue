@@ -845,10 +845,10 @@ views.settings = ({ welcome } = {}) => {
         ${AI.inClaude() ? `<label><input type="radio" name="provider" value="claudeapp" ${s.provider === 'claudeapp' ? 'checked' : ''}><span>✳︎ Mon abonnement Claude</span></label>` : ''}</div></div>
       ${AI.inClaude() ? '<p class="muted small">✳︎ <b>Mon abonnement Claude</b> : aucune clé, aucun coût — les leçons utilisent ton abonnement claude.ai (dans ses limites d’usage).</p>' : ''}
       <div class="free-box">💸 <b>Gratuit avec Gemini</b> : crée ta clé sur <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> avec un compte Gmail personnel et <b>n’active pas la facturation</b> → rien ne peut être facturé. Laisse le modèle sur <code>auto</code> : l’app choisit le modèle gratuit le plus généreux et change de modèle si un quota est atteint.<br><small>Requêtes IA aujourd’hui sur cet appareil : <b>${AI.usageToday().n}</b>${Object.keys(AI.usageToday().models).length ? ' (' + Object.entries(AI.usageToday().models).map(([m, n]) => `${esc(m)} : ${n}`).join(', ') + ')' : ''}</small></div>
-      <label>Clé API Gemini<input type="password" name="geminiKey" value="${esc(s.geminiKey)}" placeholder="AIza…" autocomplete="off"></label>
-      <label>Modèle Gemini <small>(<code>auto</code> recommandé)</small><input name="geminiModel" value="${esc(s.geminiModel)}" list="gm" placeholder="auto"><datalist id="gm"><option value="auto"></datalist></label>
+      <label>Clé API Gemini<input type="password" name="geminiKey" value="${esc(s.geminiKey)}" placeholder="AIza…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></label>
+      <label>Modèle Gemini <small>(<code>auto</code> recommandé)</small><input name="geminiModel" value="${esc(s.geminiModel)}" list="gm" placeholder="auto" autocorrect="off" autocapitalize="off" spellcheck="false"><datalist id="gm"><option value="auto"></datalist></label>
       <label>Clé API Claude<input type="password" name="claudeKey" value="${esc(s.claudeKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
-      <label>Modèle Claude<input name="claudeModel" value="${esc(s.claudeModel)}" list="cm"><datalist id="cm"></datalist></label>
+      <label>Modèle Claude<input name="claudeModel" value="${esc(s.claudeModel)}" list="cm" autocorrect="off" autocapitalize="off" spellcheck="false"><datalist id="cm"></datalist></label>
       <div class="row"><button type="button" class="btn" id="test">🔌 Tester</button><button type="button" class="btn" id="models">📃 Lister les modèles</button></div>
       <p class="muted small">💡 Avec une clé Gemini, l’app peut aussi transcrire ta voix quand le navigateur ne sait pas le faire (iPhone en mode app).</p>
       <label>Micro<select name="micMode">
@@ -861,7 +861,7 @@ views.settings = ({ welcome } = {}) => {
       <button class="btn primary big">Enregistrer</button>
     </form>
     ${p ? profileSettings(p) : ''}
-    <p class="muted small center">FluentQuest v3 · données stockées localement sur cet appareil</p></div>`;
+    <p class="muted small center">FluentQuest v3.1 · données stockées localement sur cet appareil</p></div>`;
   bindGo();
   const form = $('#sf');
   const collect = () => {

@@ -107,6 +107,11 @@ async function callGemini(settings, { system, messages, json = true, extraParts 
       throw new Error(`Gemini : ${msg}`);
     }
   }
+  // Modèle saisi à la main introuvable (faute de frappe, correcteur automatique…) → repasse en « auto »
+  if (manual && lastErr && lastErr !== 'quota' && lastErr !== 'rate') {
+    settings.geminiModel = 'auto'; geminiList = null;
+    return callGemini(settings, { system, messages, json, extraParts });
+  }
   if (lastErr === 'quota' || (!tryList.length && !manual))
     throw new QuotaError('Quota gratuit Gemini du jour épuisé. Il se recharge chaque jour vers 9 h (heure de Paris). En attendant, la révision des cartes 🃏 et la prononciation 🎙️ marchent sans IA.');
   if (lastErr === 'rate') throw new QuotaError('Trop de demandes en une minute pour l’offre gratuite : patiente 1 minute puis touche « Réessayer ».');

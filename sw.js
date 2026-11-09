@@ -1,5 +1,5 @@
 // Service worker : l'app fonctionne hors-ligne (sauf les leçons IA qui nécessitent Internet)
-const CACHE = 'fluentquest-v3';
+const CACHE = 'fluentquest-v4';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/app.js', 'js/ai.js', 'js/speech.js', 'js/store.js', 'js/curriculum.js', 'js/sfx.js',
